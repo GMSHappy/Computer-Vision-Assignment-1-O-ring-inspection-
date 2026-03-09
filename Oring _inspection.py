@@ -4,145 +4,159 @@ import time
 import os
 
 
-# histogram function - counts how many pixels there are at each grey level
-# from lecture 2 slide 5: "An image histogram shows us the distribution of grey levels"
-# going through every pixel and incrementing the right bin
+
 def compute_histogram(grey_img):
+
+    # imagine 256 empty buckets, one for each shade (0 = black, 255 = white)
     hist = np.zeros(256, dtype=np.int64)
+    
+    # find out how tall and wide the image is
     rows = grey_img.shape[0]
     cols = grey_img.shape[1]
+    
+    # visit every pixel in the image, one by one 
     for r in range(rows):
         for c in range(cols):
+
+            # check what shade of grey this pixel is (0-255)
             gl = grey_img[r, c]
+        
             hist[gl] += 1
+    
     return hist
 
-
-# threshold using the clustering algorithm from lecture 2 slide 10
-# 1. start with T = mean grey level
-# 2. split into C1 (> T) and C2 (<= T)
-# 3. get mean of each cluster (mu1, mu2)
-# 4. new T = (mu1 + mu2) / 2
-# 5. repeat until T doesnt change
 def find_threshold(grey_img):
+
+    # add up all pixel shades and divide by the number of pixels = average shade
+    # this becomes our "dividing line" between dark and light
+    # e.g. average shade is 120? anything below 120 = black, above 120 = white
+
+ # start with the average shade as our first guess for the dividing line
     T = int(np.mean(grey_img))
 
     while True:
-        above = grey_img[grey_img > T]
-        below = grey_img[grey_img <= T]
 
-        # edge case - if one cluster is empty just stop
+        above = grey_img[grey_img > T]   # pixels brighter than T (the "light" group)
+        below = grey_img[grey_img <= T]  # pixels darker than T  (the "dark" group)
+
+        # safety check - if one group is empty, we cant improve T anymore so stop
         if len(above) == 0 or len(below) == 0:
             break
 
-        mu1 = np.mean(above)
-        mu2 = np.mean(below)
+        # find the average shade of each group
+        mu1 = np.mean(above)  # average of the light pixels
+        mu2 = np.mean(below)  # average of the dark pixels
 
+        # our new dividing line = halfway between the two averages
         new_T = int((mu1 + mu2) / 2)
 
+        # if T didnt change, we've found the best dividing line so stop
         if new_T == T:
             break
-
         T = new_T
 
     return T
 
-
-# thresholding - lecture 2 slide 4
-# "convert a grey level image into a binary image depending on whether
-#  the pixels are above or below a threshold t"
-# pixel > T -> white (255), else -> black (0)
 def threshold_image(grey_img, T):
     rows = grey_img.shape[0]
     cols = grey_img.shape[1]
+    
+    # create a blank black image the same size as the original
     binary = np.zeros((rows, cols), dtype=np.uint8)
+    
+    # visit every pixel
     for r in range(rows):
         for c in range(cols):
+            # if this pixel is brighter than our dividing line, make it white
+            # otherwise it stays black (already set to 0 above)
             if grey_img[r, c] > T:
                 binary[r, c] = 255
+    
+    # return the new black and white image
     return binary
 
 
-# dilation - lecture 2 slide 27
-# "if at least one pixel in the structuring element coincides with a
-#  foreground pixel in the image underneath then the input pixel is set
-#  to the foreground value"
 def dilation(binary, kernel):
-    ksize = kernel.shape[0]
-    pad   = ksize // 2
+    ksize = kernel.shape[0]  # size of the kernel (e.g. 3 = a 3x3 grid)
+    pad   = ksize // 2       # how many pixels to stay away from the edge (e.g. 1 for 3x3)
     rows  = binary.shape[0]
     cols  = binary.shape[1]
-    out   = np.zeros((rows, cols), dtype=np.uint8)
+    out   = np.zeros((rows, cols), dtype=np.uint8)  # blank output image
 
+    # visit every pixel that isnt on the border
     for r in range(pad, rows - pad):
         for c in range(pad, cols - pad):
             hit = False
+            
+            # slide the kernel over this pixel and check its neighbours
             for i in range(ksize):
                 for j in range(ksize):
+                    # only check spots where the kernel has a 1
                     if kernel[i, j] == 1:
+                        # if ANY neighbour is white, this pixel becomes white
                         if binary[r - pad + i, c - pad + j] == 255:
                             hit = True
             if hit:
                 out[r, c] = 255
 
+    # dilation GROWS white regions - if you touch white, you become white
     return out
 
 
-# erosion - lecture 2 slide 26
-# "if every pixel in the structuring element corresponds with the image
-#  pixels underneath then the input pixel is left as it is"
 def erosion(binary, kernel):
-    ksize = kernel.shape[0]
-    pad   = ksize // 2
+    ksize = kernel.shape[0]  # size of the kernel
+    pad   = ksize // 2       # border buffer
     rows  = binary.shape[0]
     cols  = binary.shape[1]
-    out   = np.zeros((rows, cols), dtype=np.uint8)
+    out   = np.zeros((rows, cols), dtype=np.uint8)  # blank output image
 
+    # visit every pixel that isnt on the border
     for r in range(pad, rows - pad):
         for c in range(pad, cols - pad):
             all_fg = True
+            
+            # slide the kernel over this pixel and check its neighbours
             for i in range(ksize):
                 for j in range(ksize):
+                    # only check spots where the kernel has a 1
                     if kernel[i, j] == 1:
+                        # if ANY neighbour is black, this pixel becomes black
                         if binary[r - pad + i, c - pad + j] == 0:
                             all_fg = False
             if all_fg:
                 out[r, c] = 255
 
+    # erosion SHRINKS white regions - if you touch black, you become black
     return out
 
 
-# closing = dilation then erosion - lecture 2 slide 28
-# "by performing an erosion on the image after the dilation i.e. a closing
-#  we reduce some of this effect. the size of the holes you fill depends
-#  on the structuring element"
 def closing(binary, kernel):
+    # step 1: dilate  (grow white regions - fills in small holes/gaps)
+    # step 2: erode   (shrink back down - restores original size)
+    # the result: holes inside white regions get filled in
     return erosion(dilation(binary, kernel), kernel)
 
 
-# connected component labelling - queue-based approach from lecture 2 slides 32-33
-# algorithm:
-#  set curlab = 1
-#  scan pixel by pixel - if foreground and unlabelled give it curlab, add to queue
-#  pop from queue, check all 8 neighbours (8-connectivity)
-#  if neighbour is foreground and unlabelled give it curlab, push to queue
-#  when queue empty increment curlab, keep scanning
 def connected_components(binary):
     rows   = binary.shape[0]
     cols   = binary.shape[1]
+    
+    # create a blank label map - each white blob will get its own number
     labels = np.zeros((rows, cols), dtype=np.int32)
-    curlab = 1
+    curlab = 1  # start labelling blobs from 1
 
     for r in range(rows):
         for c in range(cols):
+            # if this pixel is white and hasnt been labelled yet, its a new blob
             if binary[r, c] == 255 and labels[r, c] == 0:
                 labels[r, c] = curlab
-                queue = [(r, c)]
+                queue = [(r, c)]  # add it to the queue to explore its neighbours
 
+                # keep going until weve explored the whole blob
                 while len(queue) > 0:
-                    pr, pc = queue.pop(0)
+                    pr, pc = queue.pop(0)  # grab the next pixel to explore
 
-                    # 8-connected neighbours
+                    # check all 8 surrounding neighbours (including diagonals)
                     neighbours = [
                         (pr - 1, pc - 1), (pr - 1, pc), (pr - 1, pc + 1),
                         (pr,     pc - 1),                (pr,     pc + 1),
@@ -150,18 +164,18 @@ def connected_components(binary):
                     ]
 
                     for nr, nc in neighbours:
+                        # make sure the neighbour is inside the image
                         if 0 <= nr < rows and 0 <= nc < cols:
+                            # if its white and unlabelled, its part of this blob
                             if binary[nr, nc] == 255 and labels[nr, nc] == 0:
-                                labels[nr, nc] = curlab
-                                queue.append((nr, nc))
+                                labels[nr, nc] = curlab  # give it the same label
+                                queue.append((nr, nc))   # add it to explore later
 
-                curlab += 1
+                curlab += 1  # finished this blob, next blob gets the next number
 
+    # return the label map - every pixel now has a number showing which blob it belongs to
     return labels
 
-
-# find the biggest region - that will be the oring
-# lecture 2 slide 35: "Area - the number of pixels in a region"
 def find_largest_region(labels):
     best_label = -1
     best_count = 0
@@ -175,18 +189,6 @@ def find_largest_region(labels):
 
     return best_label
 
-
-# region properties - lecture 2 slides 35-36
-# calculates: area, centroid, bounding box, circularity, fill ratio
-#
-# circularity from slide 36:
-#   circularity = mean_dist / (std_dist + 1)
-#   where mean_dist and std_dist are the mean and std of distances
-#   from the centroid to the perimeter pixels
-#
-# fill ratio = area / bounding box area
-#   a good thick oring fills most of its bounding box
-#   a broken or thin oring fills less
 def region_properties(labels, target):
     area     = 0
     sum_r    = 0
@@ -214,8 +216,7 @@ def region_properties(labels, target):
     centroid_r = sum_r / area
     centroid_c = sum_c / area
 
-    # find perimeter pixels - a pixel is on the perimeter if at least one
-    # of its 4-connected neighbours doesnt have the same label
+
     distances = []
     for r in range(1, rows - 1):
         for c in range(1, cols - 1):
@@ -243,17 +244,8 @@ def region_properties(labels, target):
 
     return area, centroid_r, centroid_c, min_r, max_r, min_c, max_c, circ, fill
 
-
-# classification - lecture 2 slide 38
-# "check the region properties against upper and lower bounds that are
-#  acceptable for that class of object - this will normally involve
-#  conditional if statements"
-#
-# fill_ratio is the main check:
-#   a good oring is thick so it fills more of its bounding box (ratio > 0.38)
-#   a damaged/thin oring fills less of the box (ratio < 0.38)
-# also check area is reasonable - too small or too large means something is wrong
 def classify_oring(area, circularity, fill_ratio):
+
     result = "PASS"
 
     if fill_ratio < 0.38:
@@ -266,10 +258,6 @@ def classify_oring(area, circularity, fill_ratio):
         result = "FAIL"
 
     return result
-
-
-# ---- main loop ----
-# goes through every image in the Orings folder and runs all the steps
 
 image_folder = "Orings"
 image_files  = sorted(os.listdir(image_folder))
@@ -287,26 +275,23 @@ for filename in image_files:
 
     t_start = time.time()
 
-    # step 1 - histogram
+
     hist = compute_histogram(img_grey)
 
-    # step 2 - find threshold using clustering algorithm from lecture 2
     T = find_threshold(img_grey)
     print("  Threshold = " + str(T))
 
-    # step 3 - threshold the image
+  
     binary = threshold_image(img_grey, T)
 
-    # make sure the oring is white - if more than half the image is white
-    # then we have it backwards so invert
     if np.sum(binary == 255) > (binary.size * 0.5):
         binary = 255 - binary
 
-    # step 4 - closing to fill any holes in the oring region (lecture 2 slide 28)
+   
     kernel       = np.ones((5, 5), dtype=np.uint8)
     binary_clean = closing(binary, kernel)
 
-    # step 5 - connected component labelling (lecture 2 slides 32-33)
+  
     labels = connected_components(binary_clean)
 
     ring_label = find_largest_region(labels)
@@ -316,7 +301,6 @@ for filename in image_files:
         print("")
         continue
 
-    # step 6 - region properties and classification (lecture 2 slides 35-36, 38)
     area, c_r, c_c, mn_r, mx_r, mn_c, mx_c, circ, fill = region_properties(labels, ring_label)
 
     result = classify_oring(area, circ, fill)
@@ -331,7 +315,7 @@ for filename in image_files:
     print("  Time        = " + str(round(elapsed, 3)) + "s")
     print("")
 
-    # annotate output image using opencv (allowed as per assignment spec)
+
     output = img_colour.copy()
 
     if result == "PASS":
@@ -341,24 +325,22 @@ for filename in image_files:
         rect_col = (0, 0, 220)
         text_col = (0, 0, 200)
 
-    # bounding box around the oring region
+
     cv.rectangle(output, (mn_c, mn_r), (mx_c, mx_r), rect_col, 2)
 
-    # pass/fail text
+   
     cv.putText(output, result, (10, 40), cv.FONT_HERSHEY_SIMPLEX, 1.2, text_col, 3)
 
-    # processing time on the image (required by assignment)
+
     cv.putText(output, "Time: " + str(round(elapsed, 3)) + "s",
                (10, 72), cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-    # extra info for debugging
     cv.putText(output, "Fill: " + str(round(fill, 3)),
                (10, 96), cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
     cv.putText(output, "Circ: " + str(round(circ, 3)),
                (10, 120), cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-    # filename at the bottom
     cv.putText(output, filename, (10, output.shape[0] - 10),
                cv.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
 
