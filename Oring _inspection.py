@@ -3,8 +3,6 @@ import numpy as np
 import time
 import os
 
-
-
 def compute_histogram(grey_img):
 
     # imagine 256 empty buckets, one for each shade (0 = black, 255 = white)
@@ -126,7 +124,6 @@ def erosion(binary, kernel):
             if all_fg:
                 out[r, c] = 255
 
-    # erosion SHRINKS white regions - if you touch black, you become black
     return out
 
 
@@ -138,18 +135,18 @@ def connected_components(binary):
     rows   = binary.shape[0]
     cols   = binary.shape[1]
     
-    # create a blank label map the same size as the image, to store which blob each pixel belongs to
+    # create a blank label map the same size as the image, to store which ring each pixel belongs to
     labels = np.zeros((rows, cols), dtype=np.int32)
-    curlab = 1  # start labelling blobs from 1
+    curlab = 1  # start labelling rings from 1
 
     for r in range(rows):
         for c in range(cols):
-            # if this pixel is white and hasnt been labelled yet, its a new blob
+            # if this pixel is white and hasnt been labelled yet, its a new ring
             if binary[r, c] == 255 and labels[r, c] == 0:
                 labels[r, c] = curlab
                 queue = [(r, c)]  # add it to the queue to explore its neighbours
 
-                # keep going until weve explored the whole blob
+                # keep going until weve explored the whole ring
                 while len(queue) > 0:
                     pr, pc = queue.pop(0)  # grab the next pixel to explore
 
@@ -165,38 +162,38 @@ def connected_components(binary):
 
                         if 0 <= nr < rows and 0 <= nc < cols:
 
-                            # if its white and unlabelled, its part of this blob
+                            # if its white and unlabelled, its part of this ring 
 
                             if binary[nr, nc] == 255 and labels[nr, nc] == 0:
                                 labels[nr, nc] = curlab  # give it the same label
                                 queue.append((nr, nc))   # add it to explore later
 
-                curlab += 1  # finished this blob, next blob gets the next number
+                curlab += 1  # finished this ring, next ring gets the next number
 
-    # return the label map where each pixel has a number representing which blob it belongs to (0 = background)
+    # return the label map where each pixel has a number representing which ring it belongs to (0 = background)
     return labels
 
 def find_largest_region(labels):
-    best_label = -1   # will hold the label number of the biggest blob
-    best_count = 0    # will hold the size of the biggest blob so far
+    best_label = -1   # will hold the label number of the biggest ring
+    best_count = 0    # will hold the size of the biggest ring so far
 
-    num_labels = labels.max()  # how many blobs were found in total
+    num_labels = labels.max()  # how many rings were found in total
     
-    # go through every blob one by one
+    # go through every ring one by one
     for lbl in range(1, num_labels + 1):
-        count = np.sum(labels == lbl)  # count how many pixels belong to this blob
+        count = np.sum(labels == lbl)  # count how many pixels belong to this ring
         
-        # if this blob is bigger than the current best, update our best
+        # if this ring is bigger than the current best, update our best
         if count > best_count:
             best_count = count
             best_label = lbl
 
-    # return the label number of the biggest blob
+    # return the label number of the biggest ring
     return best_label
 
 
 def region_properties(labels, target):
-    area  = 0    # how many pixels are in this blob
+    area  = 0    # how many pixels are in this ring
     sum_r = 0    # running total of row positions to find the centroid
     sum_c = 0    # running total of col positions 
 
@@ -212,7 +209,7 @@ def region_properties(labels, target):
     # visit every pixel in the image
     for r in range(rows):
         for c in range(cols):
-            if labels[r, c] == target:   # if this pixel belongs to our blob
+            if labels[r, c] == target:   # if this pixel belongs to our ring
                 area  += 1               # count it
                 sum_r += r               # add its row to the running total
                 sum_c += c               # add its col to the running total
@@ -223,7 +220,7 @@ def region_properties(labels, target):
                 if c < min_c: min_c = c
                 if c > max_c: max_c = c
 
-    # centre of the blob = average row and average col of all its pixels
+    # centre of the ring = average row and average col of all its pixels
     centroid_r = sum_r / area
     centroid_c = sum_c / area
 
@@ -237,7 +234,7 @@ def region_properties(labels, target):
                 left  = labels[r, c - 1]
                 right = labels[r, c + 1]
                 
-                # if any neighbour is NOT part of our blob, this is an edge pixel
+                # if any neighbour is NOT part of our ring, this is an edge pixel
                 if up != target or down != target or left != target or right != target:
                     d = np.sqrt((r - centroid_r) ** 2 + (c - centroid_c) ** 2)
                     distances.append(d)  # save the distance from centre to this edge pixel
@@ -252,7 +249,7 @@ def region_properties(labels, target):
     else:
         circ = 0.0
 
-    # fill ratio = how much of the bounding box is actually filled by the blob
+    # fill ratio = how much of the bounding box is actually filled by the ring
     # a solid square would be 1.0, a ring would be lower
     bbox_area = (max_r - min_r) * (max_c - min_c)
     if bbox_area > 0:
@@ -267,15 +264,15 @@ def classify_oring(area, circularity, fill_ratio):
 
     result = "PASS"  # innocent until proven guilty
 
-    # fail if the blob doesnt fill enough of its bounding box (probably broken/incomplete)
+    # fail if the o-ring doesn't fill enough of its bounding box (probably broken/incomplete)
     if fill_ratio < 0.38:
         result = "FAIL"
 
-    # fail if the blob is too small (probably a speck of dust or noise, or maybe the o-ring is really broken)
+    # fail if the ring too small (probably a speck of dust or noise, or maybe the o-ring is really broken)
     if area < 4000:
         result = "FAIL"
 
-    # fail if the blob is too big (something wrong with the image/thresholding)
+    # fail if the ring too big (something wrong with the image/thresholding)
     if area > 13000:
         result = "FAIL"
 
@@ -315,10 +312,10 @@ for filename in image_files:
     kernel       = np.ones((5, 5), dtype=np.uint8)
     binary_clean = closing(binary, kernel)
 
-    # 3 find all separate white blobs
+    # 3 find all separate white rings and label them with different numbers (1, 2, 3 etc)
     labels = connected_components(binary_clean)
 
-    # 4: pick the biggest blob (should be the o-ring) 
+    # 4: pick the biggest ring (should be the o-ring) 
     ring_label = find_largest_region(labels)
 
     if ring_label == -1:
@@ -326,7 +323,7 @@ for filename in image_files:
         print("")
         continue  # skip to the next image
 
-    #  5 measure the blob's properties
+    #  5 measure the ring roperties 
     area, c_r, c_c, mn_r, mx_r, mn_c, mx_c, circ, fill = region_properties(labels, ring_label)
 
     #6: decide PASS or FAIL
